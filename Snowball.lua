@@ -56,8 +56,8 @@ local function getWorldPosition()
     )
 end
 
-math.sign = function ()
-    
+math.sign = function (input)
+    return input >= 0 and 1 or -1
 end
 
 local keysDown = {}
@@ -180,7 +180,6 @@ local function handleCameraMovement(dt)
         local x,z = getWorldPosition()
 
         if (
-            math.sign()
             levelGrid[z+1][
                 math.floor((camera.x + dx * dt) / 3 + playerWidth)
             ] == 1            
