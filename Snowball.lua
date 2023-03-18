@@ -10,7 +10,7 @@ local mon
 local levelGrid = {}
 
 local playerHeight = 4.5
-local playerWidth = 0.2
+local playerWidth = 0.5
 
 local camera = {
     x = 20,
@@ -48,16 +48,32 @@ local function mPrint(str)
     mon.setCursorPos(1, h+1)
 end
 
-local function getWorldPosition()
+local function getWorldPosition(x,z)
+    x = x or camera.x
+    z = z or camera.z
     return (
-        math.floor(camera.x / 3) - 1
+        math.floor(x / 3) 
     ), (
-        math.floor(camera.z / 3) - 1
+        math.floor(z / 3) 
     )
 end
 
 math.sign = function (input)
     return input >= 0 and 1 or -1
+end
+
+local function calculateSurrounding(x, z) 
+    return {
+        (levelGrid[z-1] or {})[x-1] or 0,
+        (levelGrid[z-1] or {})[x] or 0,
+        (levelGrid[z-1] or {})[x+1] or 0,
+        (levelGrid[z] or {})[x-1] or 0,
+        0,
+        (levelGrid[z] or {})[x+1] or 0,
+        (levelGrid[z+1] or {})[x-1] or 0,
+        (levelGrid[z+1] or {})[x] or 0,
+        (levelGrid[z+1] or {})[x+1] or 0
+    }
 end
 
 local keysDown = {}
@@ -71,6 +87,7 @@ local function keyInput()
             if key == keys.b then
                 local x ,z = getWorldPosition()
                 mPrint(x..", "..z)
+                mPrint(textutils.serialize(calculateSurrounding(x, z)))
             end
         elseif event == "key_up" then
             keysDown[key] = nil
@@ -177,18 +194,46 @@ local function handleCameraMovement(dt)
 
         -- update the camera position by adding the offset and collision detection
 
-        local x,z = getWorldPosition()
+        -- instead of trying to negate, i will check whether the sorroundings have a 1 and if they do, i won't allow movement into those quadrants
 
-        if (
-            levelGrid[z+1][
-                math.floor((camera.x + dx * dt) / 3 + playerWidth)
-            ] == 1            
-        ) then
-            dx = 0
+        if dz ~= 0 or dx ~= 0 then
+                
+            local x,z = getWorldPosition()
+
+            -- local 
+
+            local localGrid = calculateSurrounding(x, z)
+
+            if ((function()
+                local i = 0
+                for j,v in ipairs(localGrid) do
+                    i = i + v
+                end
+                return i
+            end)() > 0) then
+                local xn, zn = getWorldPosition(
+                    camera.x + dx * dt + math.sign(dx) * playerWidth,
+                    camera.z + dz * dt + math.sign(dz) * playerWidth
+                )
+
+                local difX = xn - x
+                local difZ = zn - z
+                if localGrid[(difZ+1)*3+(difX+2)] == 1 then
+                    if xn ~= x and zn ~= z then
+                        dx = 0
+                        dz = 0
+                    elseif xn ~= x then
+                        dx = 0
+                    elseif zn ~= z then
+                        dz = 0
+                    end
+                    
+                end
+            end
+
+            camera.x = camera.x + dx * dt
+            camera.z = camera.z + dz * dt
         end
-
-        camera.x = camera.x + dx * dt
-        camera.z = camera.z + dz * dt
     end
 
     do --gravity and floor detection
