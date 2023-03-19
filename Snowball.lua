@@ -10,7 +10,7 @@ local mon
 local levelGrid = {}
 
 local playerHeight = 4.5
-local playerWidth = 0.5
+local playerWidth = 1.5
 
 local camera = {
     x = 20,
@@ -64,15 +64,15 @@ end
 
 local function calculateSurrounding(x, z) 
     return {
-        (levelGrid[z-1] or {})[x-1] or 0,
-        (levelGrid[z-1] or {})[x] or 0,
-        (levelGrid[z-1] or {})[x+1] or 0,
-        (levelGrid[z] or {})[x-1] or 0,
-        0,
-        (levelGrid[z] or {})[x+1] or 0,
-        (levelGrid[z+1] or {})[x-1] or 0,
-        (levelGrid[z+1] or {})[x] or 0,
-        (levelGrid[z+1] or {})[x+1] or 0
+        levelGrid[z-1][x-1] or 0,
+        levelGrid[z-1][x] or 0,
+        levelGrid[z-1][x+1] or 0,
+        levelGrid[z][x-1] or 0,
+        levelGrid[z][x] or 0,
+        levelGrid[z][x+1] or 0,
+        levelGrid[z+1][x-1] or 0,
+        levelGrid[z+1][x] or 0,
+        levelGrid[z+1][x+1] or 0
     }
 end
 
@@ -80,14 +80,15 @@ local keysDown = {}
 local function keyInput() 
     while true do 
 ---@diagnostic disable-next-line: undefined-field
-        local event, key, x, y = os.pullEvent()
+        local event, key = os.pullEvent()
 
         if event == "key" then
             keysDown[key] = true
             if key == keys.b then
-                local x ,z = getWorldPosition()
+                local x, z = getWorldPosition()
                 mPrint(x..", "..z)
                 mPrint(textutils.serialize(calculateSurrounding(x, z)))
+                mPrint(tostring(levelGrid[z][x] == 1))
             end
         elseif event == "key_up" then
             keysDown[key] = nil
@@ -135,6 +136,8 @@ local function loadLevel(name)
                 table.insert(objects, loadObject('snowman', x, 0.1, z))
                 table.insert(objects, loadObject('floor', x, 0, z))
                 table.insert(levelGrid[z], 0)
+            elseif value == 2^15 then
+                table.insert(levelGrid[z], 1)
             end
         end
     end
@@ -142,19 +145,22 @@ local function loadLevel(name)
     for i, v in ipairs(objects) do
         table.insert(objectRefs, v)
     end
-    -- local file = fs.open("/bruh", "w")
-    -- file.write(textutils.serialize(level))
-    -- file.close()
+    local file = fs.open("/bruh", "w")
+    local debugStr = ""
+    for i,v in ipairs(levelGrid) do
+        for j,v2 in ipairs(v) do
+            debugStr = debugStr..(v2 == 1 and '@' or '.')
+        end
+        debugStr = debugStr.."\n"
+    end
+    file.write(debugStr)
+    file.close()
 end
 
 
 local function throwSnowball() 
     
 end 
-
-local function renderSnowball()
-    ThreeDFrame.buffer:image(10,10,{{colors.red, colors.red}, {colors.red, colors.red, colors.red}})
-end
 
 local function handleCameraMovement(dt)
     local dx, dy, dz = 0, 0, 0 -- will represent the movement per second
@@ -220,8 +226,8 @@ local function handleCameraMovement(dt)
                 local difZ = zn - z
                 if localGrid[(difZ+1)*3+(difX+2)] == 1 then
                     if xn ~= x and zn ~= z then
-                        dx = 0
-                        dz = 0
+                        dx = (localGrid[5 + math.sign(dx)] == 0) and dx or 0
+                        dz = (localGrid[5 + 3 * math.sign(dz)] == 0) and dz or 0
                     elseif xn ~= x then
                         dx = 0
                     elseif zn ~= z then
@@ -233,6 +239,23 @@ local function handleCameraMovement(dt)
 
             camera.x = camera.x + dx * dt
             camera.z = camera.z + dz * dt
+
+            x,z = getWorldPosition()
+
+            if (levelGrid[z][x] == 1) then
+                -- mPrint("bruh")
+                local offsetS = 1
+                local offsetO = 1.5
+                if (levelGrid[z][x+1] == 0) then 
+                    camera.x = (x+offsetS)*3+offsetO
+                elseif (levelGrid[z][x-1] == 0) then 
+                    camera.x = (x-offsetS)*3+offsetO
+                elseif (levelGrid[z+1][x] == 0) then 
+                    camera.z = (z+offsetS)*3+offsetO
+                elseif (levelGrid[z-1][x] == 0) then 
+                    camera.z = (z-offsetS)*3+offsetO
+                end
+            end
         end
     end
 
