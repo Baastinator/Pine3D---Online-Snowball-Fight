@@ -1,14 +1,15 @@
 local Pine3d = require"Pine3D"
-
-local speed = 15
-local turnSpeed = 120
-
 local ThreeDFrame = Pine3d.newFrame()
 
+local runParams = {...}
+local speed = 15
+local turnSpeed = 120
 local mon
-
+local config
+local ws
+local clientId
+local wsMsg
 local levelGrid = {}
-
 local playerHeight = 4.5
 local playerWidth = 1.5
 
@@ -25,15 +26,18 @@ local camera = {
 ThreeDFrame:setCamera(camera)
 ThreeDFrame:setFoV(100)
 
-local objects = {
-    ThreeDFrame:newObject(
-        Pine3d.models:icosphere({res=2, color=colors.white, bottom=colors.gray}),
-        20, 5, 20
-    )
+local clientObjects = {
 }
 
-local objectRefs = {
+local serverObjects = {
+    snowball1 =
+        ThreeDFrame:newObject(
+            Pine3d.models:icosphere({res=2, color=colors.white, bottom=colors.gray}),
+            20, 5, 20
+        )
 }
+
+local objectRefs = { }
 
 local function mPrint(str)
     mon.write(str)
@@ -76,6 +80,25 @@ local function calculateSurrounding(x, z)
     }
 end
 
+local function receive()
+    while not ws do
+        ---@diagnostic disable-next-line: undefined-field
+        os.queueEvent("gameLoop")
+        ---@diagnostic disable-next-line: undefined-field
+        os.pullEventRaw("gameLoop")
+    end
+    local id 
+    while true do
+        wsMsg = ws.receive()
+        if wsMsg:match('id([0-9]+)') then
+            id = wsMsg:match('id([0-9]+)')
+            ws.send("connect - id"..id)
+        elseif wsMsg == "confirmed" then
+            clientId = id
+        end
+    end
+end
+
 local keysDown = {}
 local function keyInput() 
     while true do 
@@ -84,12 +107,6 @@ local function keyInput()
 
         if event == "key" then
             keysDown[key] = true
-            if key == keys.b then
-                local x, z = getWorldPosition()
-                mPrint(x..", "..z)
-                mPrint(textutils.serialize(calculateSurrounding(x, z)))
-                mPrint(tostring(levelGrid[z][x] == 1))
-            end
         elseif event == "key_up" then
             keysDown[key] = nil
         end
@@ -98,43 +115,50 @@ end
 
 local function loadLevel(name) 
     for i = 0, 10+math.floor(10*(math.random())) do
-        table.insert(objects, ThreeDFrame:newObject('models/cloud.p3d', 50000*(2*math.random()-1), 1000*(5*math.random()+10), 50000*(2*math.random()-1), nil, 2*math.pi*math.random()))
+        table.insert(clientObjects, ThreeDFrame:newObject('models/cloud.p3d', 50000*(2*math.random()-1), 1000*(5*math.random()+10), 50000*(2*math.random()-1), nil, 2*math.pi*math.random()))
     end
 
-    table.insert(objects, ThreeDFrame:newObject('models/sun.p3d', -100000, 100000, 200000, 1.2*math.pi))
+    table.insert(clientObjects, ThreeDFrame:newObject('models/sun.p3d', -100000, 100000, 200000, 1.2*math.pi))
 
-    local level = paintutils.loadImage("/levels/"..name)
-    local function loadObject(name, x, y, z)
-        return ThreeDFrame:newObject('models/'..name..'.p3d', 3*x, y, 3*z)
+    local file = fs.open("/levels/"..name..".lev","w")
+    local levelString = http.get("http"..config.address.."3000/level1").readAll()
+    file.write(levelString)
+    file.close()
+    local level = paintutils.loadImage("/levels/"..name..'.lev')
+    local function loadObject(name, x, y, z, rot)
+        return ThreeDFrame:newObject('models/'..name..'.p3d', 3*x, y, 3*z, nil, rot)
     end
     for z, row in ipairs(level) do
         levelGrid[z] = {}
         for x, value in ipairs(row) do
             if value == 0 then
-                table.insert(objects, loadObject('floor', x, 0, z))
+                if 100*math.random() > 99 then
+                    table.insert(clientObjects, loadObject('snowman', x, 0.1, z, 2*math.pi*math.random()))
+                end
+                table.insert(clientObjects, loadObject('floor', x, 0, z))
                 table.insert(levelGrid[z], 0)
             elseif value == 1 then
-                table.insert(objects, loadObject('wallx', x, 0, z))
-                table.insert(objects, loadObject('roof', x, 0, z))
+                table.insert(clientObjects, loadObject('wallx', x, 0, z))
+                table.insert(clientObjects, loadObject('roof', x, 0, z))
                 table.insert(levelGrid[z], 1)
             elseif value == 2 then
-                table.insert(objects, loadObject('wallz', x, 0, z))
-                table.insert(objects, loadObject('roof', x, 0, z))
+                table.insert(clientObjects, loadObject('wallz', x, 0, z))
+                table.insert(clientObjects, loadObject('roof', x, 0, z))
                 table.insert(levelGrid[z], 1)
             elseif value == 2^2 then
-                table.insert(objects, loadObject('wallz', x, 0, z))
-                table.insert(objects, loadObject('wallx', x, 0, z))
-                table.insert(objects, loadObject('roof', x, 0, z))
+                table.insert(clientObjects, loadObject('wallz', x, 0, z))
+                table.insert(clientObjects, loadObject('wallx', x, 0, z))
+                table.insert(clientObjects, loadObject('roof', x, 0, z))
                 table.insert(levelGrid[z], 1)
             elseif value == 2^3 then
                 table.insert(levelGrid[z], 0)
-                table.insert(objects, loadObject('floor', x, 0, z))
-                camera.x = 3*(x+1)
-                camera.y = playerHeight
-                camera.z = 3*(z+1)
+                table.insert(clientObjects, loadObject('floor', x, 0, z))
+                -- camera.x = 3*(x+1)
+                -- camera.y = playerHeight
+                -- camera.z = 3*(z+1)
             elseif value == 2^4 then
-                table.insert(objects, loadObject('snowman', x, 0.1, z))
-                table.insert(objects, loadObject('floor', x, 0, z))
+                -- table.insert(clientObjects, loadObject('snowman', x, 0.1, z, 2*math.pi*math.random()))
+                table.insert(clientObjects, loadObject('floor', x, 0, z))
                 table.insert(levelGrid[z], 0)
             elseif value == 2^15 then
                 table.insert(levelGrid[z], 1)
@@ -142,17 +166,18 @@ local function loadLevel(name)
         end
     end
 
-    for i, v in ipairs(objects) do
+    for i, v in ipairs(clientObjects) do
         table.insert(objectRefs, v)
     end
-    local file = fs.open("/bruh", "w")
+
     local debugStr = ""
     for i,v in ipairs(levelGrid) do
         for j,v2 in ipairs(v) do
-            debugStr = debugStr..(v2 == 1 and '@' or '.')
+            debugStr = debugStr..(v2 == 1 and '@@' or '  ')
         end
         debugStr = debugStr.."\n"
     end
+    local file = fs.open("bruh","w")
     file.write(debugStr)
     file.close()
 end
@@ -256,12 +281,21 @@ local function handleCameraMovement(dt)
                     camera.z = (z-offsetS)*3+offsetO
                 end
             end
+
+            ws.send('cd-'..textutils.serialiseJSON({
+                id=clientId,
+                position={
+                    x=camera.x,
+                    y=camera.y,
+                    z=camera.z
+                }
+            }))
         end
     end
 
     do --gravity and floor detection
         if keysDown[keys.space] and math.abs(camera.y - playerHeight) < 0.1 then
-            camera.velY = 10
+            camera.velY = 10 * (not not runParams[3] and tonumber(runParams[3]) or 1)
         end
     
         if camera.y > playerHeight then
@@ -281,9 +315,6 @@ end
 -- handle game logic
 local function handleGameLogic(dt)
     
-    do --wall collision
-        
-    end
 end
 
 local function initDebugMon() 
@@ -295,7 +326,23 @@ end
 
 -- handle the game logic and camera movement in steps
 local function gameLoop()
-    initDebugMon()
+    -- initDebugMon()
+    
+    local configFile = fs.open('/config.json',"r")
+    config = textutils.unserialiseJSON(configFile.readAll())
+    local err
+    if (runParams[2] ~= "1") then
+        ws, err = http.websocket("ws"..config.address.."3001")
+    else
+        ws = {
+            receive = function() return os.pullEvent('dddd') end,
+            send = function(str) end,
+            close = function() end
+        }
+    end
+    if (not ws) then error("websocket error: "..err) end
+    configFile.close()
+    ws.send('connect')
     local lastTime = os.clock()
     loadLevel('1')
 
@@ -332,4 +379,12 @@ local function rendering()
     end
 end
 
-parallel.waitForAny(keyInput, gameLoop, rendering)
+local function closing()
+    term.clear()
+    term.setCursorPos(1,1)
+    if (ws) then ws.close() end
+end
+
+local ok, err = pcall(parallel.waitForAny,keyInput, gameLoop, rendering, receive)
+closing()
+if not ok and err ~= "Terminated" then printError(err) end
